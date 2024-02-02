@@ -1,5 +1,5 @@
 import pandas as pd
-from sklearn.feature_selection import VarianceThreshold, SelectKBest, chi2, f_classif, mutual_info_classif
+from sklearn.feature_selection import VarianceThreshold, SelectKBest, chi2, f_classif, mutual_info_classif,r_regression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
