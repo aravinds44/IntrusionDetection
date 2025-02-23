@@ -6,7 +6,8 @@ from sklearn.metrics import accuracy_score
 
 
 class PSOFeatureSelector:
-    def __init__(self, X, y, num_particles=10, max_iter=20, alpha=0.99):
+    def __init__(self, X, y, num_particles=10, max_iter=20, alpha=0.99,
+                 w=0.7, c1=2.0, c2=2.0):  # Added w, c1, c2 parameters
         self.X = X
         self.y = y
         self.num_particles = num_particles
@@ -14,18 +15,23 @@ class PSOFeatureSelector:
         self.num_features = X.shape[1]
         self.global_best_position = np.random.randint(2, size=self.num_features)
         self.global_best_score = 0
-        self.alpha = alpha  # Weight for accuracy vs feature count trade-off
+        self.alpha = alpha
+
+        # PSO parameters
+        self.w = w  # Inertia weight
+        self.c1 = c1  # Cognitive coefficient
+        self.c2 = c2  # Social coefficient
 
         self.history = {
             'global_best_scores': [],
             'mean_particle_scores': [],
             'selected_feature_counts': [],
-            'pure_accuracy_scores': []  # Track accuracy without penalty
+            'pure_accuracy_scores': []
         }
 
     def fitness(self, features):
         if np.sum(features) == 0:
-            return 0
+            return 0, 0
 
         selected_features = self.X.iloc[:, features.astype(bool)]
         X_train, X_test, y_train, y_test = train_test_split(selected_features, self.y, test_size=0.2, random_state=42)
@@ -36,27 +42,30 @@ class PSOFeatureSelector:
 
         accuracy = accuracy_score(y_test, y_pred)
 
-        # Feature count penalty term
+        # Feature count penalty
         feature_ratio = np.sum(features) / self.num_features
-        penalty = (1 - feature_ratio)  # Higher when fewer features are selected
+        penalty = (1 - feature_ratio)
 
-        # Combined score: alpha * accuracy + (1-alpha) * penalty
         score = self.alpha * accuracy + (1 - self.alpha) * penalty
 
-        return score, accuracy  # Return both combined score and pure accuracy
+        return score, accuracy
 
     def optimize(self):
-        print("\n=== Starting PSO Feature Selection with Feature Minimization ===")
+        print("\n=== Starting PSO Feature Selection ===")
         print(f"Dataset dimensions: {self.X.shape}")
-        print(f"Parameters: num_particles={self.num_particles}, max_iter={self.max_iter}, alpha={self.alpha}")
+        print(f"Parameters: particles={self.num_particles}, iterations={self.max_iter}")
+        print(f"PSO parameters: w={self.w}, c1={self.c1}, c2={self.c2}, alpha={self.alpha}")
 
+        # Initialize particles and velocities
         particles = np.random.randint(2, size=(self.num_particles, self.num_features))
-        velocities = np.random.rand(self.num_particles, self.num_features)
-        personal_best_positions = np.copy(particles)
+        velocities = np.random.rand(self.num_particles, self.num_features) * 2 - 1  # Velocities between -1 and 1
 
-        # Initialize personal bests with both score and accuracy
+        # Initialize personal bests
+        personal_best_positions = np.copy(particles)
         personal_best_scores = []
         personal_best_accuracies = []
+
+        # Evaluate initial positions
         for p in particles:
             score, accuracy = self.fitness(p)
             personal_best_scores.append(score)
@@ -74,8 +83,7 @@ class PSOFeatureSelector:
         print(f"\nInitial state:")
         print(f"Best score: {self.global_best_score:.4f}")
         print(f"Pure accuracy: {self.global_best_accuracy:.4f}")
-        print(
-            f"Selected features: {np.sum(self.global_best_position)} ({np.sum(self.global_best_position) / self.num_features * 100:.1f}%)")
+        print(f"Selected features: {np.sum(self.global_best_position)}")
 
         for iteration in range(self.max_iter):
             print(f"\n--- Iteration {iteration + 1}/{self.max_iter} ---")
@@ -84,14 +92,18 @@ class PSOFeatureSelector:
             iteration_accuracies = []
 
             for i in range(self.num_particles):
-                # Update particle
-                inertia = velocities[i] * 0.5
-                cognitive = np.random.rand(self.num_features) * (personal_best_positions[i] - particles[i])
-                social = np.random.rand(self.num_features) * (self.global_best_position - particles[i])
-                velocities[i] = inertia + cognitive + social
-                particles[i] = np.where(np.random.rand(self.num_features) < 1 / (1 + np.exp(-velocities[i])), 1, 0)
+                # Update velocity using standard PSO formula
+                inertia = self.w * velocities[i]
+                cognitive = self.c1 * np.random.rand(self.num_features) * (personal_best_positions[i] - particles[i])
+                social = self.c2 * np.random.rand(self.num_features) * (self.global_best_position - particles[i])
 
-                # Evaluate particle
+                velocities[i] = inertia + cognitive + social
+
+                # Update position using sigmoid function
+                sigmoid = 1 / (1 + np.exp(-velocities[i]))
+                particles[i] = np.where(np.random.rand(self.num_features) < sigmoid, 1, 0)
+
+                # Evaluate new position
                 score, accuracy = self.fitness(particles[i])
                 iteration_scores.append(score)
                 iteration_accuracies.append(accuracy)
@@ -127,19 +139,16 @@ class PSOFeatureSelector:
             self.history['selected_feature_counts'].append(selected_features_count)
             self.history['pure_accuracy_scores'].append(self.global_best_accuracy)
 
-            print(f"\nIteration {iteration + 1} Summary:")
+            print(f"\nIteration Summary:")
             print(f"Best Score: {self.global_best_score:.4f}")
-            print(f"Best Pure Accuracy: {self.global_best_accuracy:.4f}")
-            print(
-                f"Selected Features: {selected_features_count} ({selected_features_count / self.num_features * 100:.1f}%)")
+            print(f"Best Accuracy: {self.global_best_accuracy:.4f}")
+            print(f"Selected Features: {selected_features_count}")
             print(f"Mean Score: {mean_score:.4f}")
-            print(f"Mean Accuracy: {mean_accuracy:.4f}")
 
         print("\n=== PSO Feature Selection Completed ===")
         print(f"Final Best Score: {self.global_best_score:.4f}")
-        print(f"Final Pure Accuracy: {self.global_best_accuracy:.4f}")
-        print(
-            f"Final Selected Features: {selected_features_count} ({selected_features_count / self.num_features * 100:.1f}%)")
+        print(f"Final Accuracy: {self.global_best_accuracy:.4f}")
+        print(f"Final Selected Features: {selected_features_count}")
 
         return self.global_best_position, self.global_best_score, self.global_best_accuracy, self.history
 
@@ -150,46 +159,22 @@ if __name__ == "__main__":
     X = df.drop(columns=["binaryoutcome"])
     y = df["binaryoutcome"]
 
-    pso_selector = PSOFeatureSelector(X, y, alpha=0.99)  # Adjust alpha to control accuracy vs feature count trade-off
+    # Initialize with standard PSO parameters
+    pso_selector = PSOFeatureSelector(
+        X, y,
+        num_particles=30,
+        max_iter=20,
+        alpha=0.99,
+        w=0.7,  # Inertia weight
+        c1=2.0,  # Cognitive coefficient
+        c2=2.0  # Social coefficient
+    )
+
     best_features, best_score, best_accuracy, history = pso_selector.optimize()
     selected_feature_names = X.columns[best_features.astype(bool)]
 
-    print("\nDetailed Final Results:")
-    print(f"Number of features selected: {len(selected_feature_names)} out of {X.shape[1]}")
-    print(f"Feature reduction: {(1 - len(selected_feature_names) / X.shape[1]) * 100:.1f}%")
-    print(f"Pure accuracy: {best_accuracy:.4f}")
-    print(f"Combined score: {best_score:.4f}")
+    print("\nFinal Results:")
+    print(f"Selected {len(selected_feature_names)} out of {X.shape[1]} features")
+    print(f"Accuracy: {best_accuracy:.4f}")
+    print(f"Combined Score: {best_score:.4f}")
     print("\nSelected features:", list(selected_feature_names))
-
-    # Visualization
-    import matplotlib.pyplot as plt
-
-    plt.figure(figsize=(15, 10))
-
-    plt.subplot(2, 2, 1)
-    plt.plot(history['global_best_scores'])
-    plt.title('Combined Score Over Iterations')
-    plt.xlabel('Iteration')
-    plt.ylabel('Score')
-
-    plt.subplot(2, 2, 2)
-    plt.plot(history['pure_accuracy_scores'])
-    plt.title('Pure Accuracy Over Iterations')
-    plt.xlabel('Iteration')
-    plt.ylabel('Accuracy')
-
-    plt.subplot(2, 2, 3)
-    plt.plot(history['selected_feature_counts'])
-    plt.title('Number of Selected Features Over Iterations')
-    plt.xlabel('Iteration')
-    plt.ylabel('Number of Features')
-
-    plt.subplot(2, 2, 4)
-    feature_percentages = [count / X.shape[1] * 100 for count in history['selected_feature_counts']]
-    plt.plot(feature_percentages)
-    plt.title('Percentage of Features Selected Over Iterations')
-    plt.xlabel('Iteration')
-    plt.ylabel('Percentage of Features')
-
-    plt.tight_layout()
-    plt.show()
